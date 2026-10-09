@@ -1,0 +1,21 @@
+{
+  "internal_error": [
+    {"pattern": "讲解点", "suggestion": "说明"},
+    {"pattern": "带敲提示|手敲提示", "suggestion": "提示"},
+    {"pattern": "(?:讲解\\s*\\d+\\s*[~～\\-–至]\\s*\\d+\\s*分钟|本节讲\\s*\\d+\\s*分钟)", "suggestion": "删除制作时长"},
+    {"pattern": "节奏模板|时间轴|计划时长", "suggestion": "删除制作流程信息"},
+    {"pattern": "内部参考|内部稿|内部文档", "suggestion": "改为读者可理解的说明或删除"}
+  ],
+  "context_warn": [
+    {"pattern": "不敲|可敲可不敲", "suggestion": "按语境改写为任务范围或交付方式"},
+    {"pattern": "本集", "suggestion": "确认是否指录制集数；必要时改为本节或明确章节"}
+  ],
+  "spoken_warn": [
+    "我们", "咱们", "大家", "来看", "看一下", "注意看", "很简单", "你会发现", "可以看到", "好，那么", "接下来我们", "其实", "记住"
+  ],
+  "filler_info": [
+    "值得注意的是", "综上所述", "总而言之", "不难看出", "需要指出的是"
+  ],
+  "pronoun_pattern": "[你我您]",
+  "prose_fence_languages": ["text", "txt", "markdown", "md", "prompt"]
+}
