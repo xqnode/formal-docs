@@ -23,7 +23,7 @@ from pathlib import Path
 
 RULES_PATH = Path(__file__).resolve().parents[1] / "references" / "default-rules.json"
 DEFAULT_ALLOW = [r"INSERT\s+INTO", r"VALUES\s*\("]
-INLINE_CODE = re.compile(r"`[^`]*`")
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 HTML_TAG = re.compile(r"<[^>]+>")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 HEADING_2 = re.compile(r"^##\s+(\d+)\.\s")
@@ -85,9 +85,10 @@ def first_h2_heading(lines: list[str]):
     return None
 
 
-def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = None) -> list[Finding]:
+def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = None,
+               *, person_style: str | None = None) -> list[Finding]:
     raw = path.read_bytes()
-    text = raw.decode("utf-8", errors="replace")
+    text = raw.decode("utf-8-sig", errors="replace")
     lines = text.splitlines()
     findings: list[Finding] = []
     rules = rules or load_rules()
@@ -111,11 +112,17 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
     elif any(not isinstance(item, str) for item in allow_setting):
         findings.append(Finding("WARN", 0, "配置", "allow_line_patterns 中的非字符串项已忽略"))
     allow = DEFAULT_ALLOW + [p for p in allow_setting if isinstance(p, str) and p]
-    try:
-        allow_re = re.compile("|".join(f"(?:{p})" for p in allow)) if allow else None
-    except re.error as exc:
-        allow_re = None
-        findings.append(Finding("WARN", 0, "配置", f"allow_line_patterns 正则无效：{exc}"))
+    allow_res = []
+    for pattern in allow:
+        try:
+            allow_res.append(re.compile(pattern))
+        except re.error as exc:
+            findings.append(Finding("WARN", 0, "配置", f"allow_line_patterns 中一项正则无效：{exc}；仅忽略该项"))
+
+    selected_person_style = person_style if person_style is not None else cfg.get("person_style", "neutral")
+    if not isinstance(selected_person_style, str) or selected_person_style not in {"neutral", "instructional", "preserve"}:
+        findings.append(Finding("WARN", 0, "配置", "person_style 仅接受 neutral / instructional / preserve；按 neutral 处理"))
+        selected_person_style = "neutral"
 
     if space is None:
         space_setting = cfg.get("space_check", False)
@@ -129,7 +136,12 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
         context_rules = [(re.compile(item["pattern"]), item.get("suggestion", "检查语境")) for item in rules["context_warn"]]
         spoken_rules = [re.compile(re.escape(word)) for word in rules["spoken_warn"]]
         filler_rules = [re.compile(re.escape(word)) for word in rules["filler_info"]]
-        pronoun_re = re.compile(rules.get("pronoun_pattern", "[你我您]"))
+        pronoun_pattern = rules.get("pronoun_pattern", "[你我您]")
+        if selected_person_style == "instructional":
+            pronoun_pattern = "我"
+        elif selected_person_style == "preserve":
+            pronoun_pattern = r"(?!)"
+        pronoun_re = re.compile(pronoun_pattern)
     except (KeyError, TypeError, re.error) as exc:
         findings.append(Finding("ERROR", 0, "规则配置", f"default-rules.json 格式或正则无效：{exc}"))
         return findings
@@ -145,10 +157,10 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
     try:
         first_heading_setting = cfg.get("first_heading_number", 1)
         if isinstance(first_heading_setting, bool) or not isinstance(first_heading_setting, (int, str)):
-            raise ValueError("必须是正整数")
+            raise ValueError("必须是非负整数")
         expected_first = int(first_heading_setting)
-        if expected_first < 1:
-            raise ValueError("必须大于等于 1")
+        if expected_first < 0:
+            raise ValueError("必须大于等于 0")
     except (TypeError, ValueError) as exc:
         findings.append(Finding("WARN", 0, "配置", f"first_heading_number 无效：{exc}；按 1 处理"))
         expected_first = 1
@@ -189,7 +201,7 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
 
         # 人称只做提示：引用块、示例数据和配置允许行不扫描。
         is_quote = line.lstrip().startswith(">")
-        is_allowed = bool(allow_re and allow_re.search(line))
+        is_allowed = any(rx.search(line) for rx in allow_res)
         if not is_quote and not is_allowed:
             match = pronoun_re.search(prose)
             if match:
@@ -235,7 +247,8 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
             continue
         blank_run = 0
 
-        if line != line.rstrip():
+        hard_break = line.endswith("  ") and line[:-2] == line[:-2].rstrip()
+        if line != line.rstrip() and not hard_break:
             findings.append(Finding("INFO", i, "行尾空白", "行尾有多余空白"))
 
         scan_prose(line, i)
@@ -277,6 +290,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="formal-docs 文档自检")
     ap.add_argument("files", nargs="+", help="待检查的 Markdown 文件")
     ap.add_argument("--config", help="项目配置 .formal-docs.json 路径")
+    ap.add_argument("--person-style", choices=("neutral", "instructional", "preserve"),
+                    help="人称检查策略；覆盖项目配置")
     space_group = ap.add_mutually_exclusive_group()
     space_group.add_argument("--space", dest="space", action="store_true", help="强制启用中英文空格检查")
     space_group.add_argument("--no-space", dest="space", action="store_false", help="强制关闭中英文空格检查")
@@ -307,7 +322,7 @@ def main() -> int:
                 continue
             try:
                 cfg = load_config(args.config, p)
-                findings = check_file(p, cfg, args.space, rules)
+                findings = check_file(p, cfg, args.space, rules, person_style=args.person_style)
             except OSError as exc:
                 findings = [Finding("ERROR", 0, "读取", f"无法读取文件：{exc}")]
             except ValueError as exc:

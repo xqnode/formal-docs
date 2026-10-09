@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -119,6 +120,83 @@ class CheckNotesTests(unittest.TestCase):
         note = self.write_note("## 1. 标题\n~~~python\nprint('x')\n")
         findings = check_file(note, {}, None, self.rules)
         self.assertIn("围栏", [item.kind for item in findings])
+
+    def test_instructional_style_keeps_reader_address_but_warns_first_person(self):
+        note = self.write_note("你可以保存文件。\n您可以关闭窗口。\n我来演示。\n")
+        findings = check_file(note, {"person_style": "instructional"}, None, self.rules)
+        self.assertEqual([x.line for x in findings if x.kind == "人称"], [3])
+
+    def test_preserve_style_does_not_disable_internal_term_checks(self):
+        note = self.write_note("你和我保留原称呼。\n讲解点：复现步骤。\n")
+        findings = check_file(note, {"person_style": "preserve"}, None, self.rules)
+        self.assertNotIn("人称", [x.kind for x in findings])
+        self.assertTrue(any(x.kind == "内部用语" and x.level == "ERROR" for x in findings))
+
+    def test_invalid_person_style_warns_and_uses_neutral_default(self):
+        note = self.write_note("你可以保存文件。\n")
+        for value in ("unknown", [], None):
+            with self.subTest(value=value):
+                findings = check_file(note, {"person_style": value}, None, self.rules)
+                self.assertIn("配置", [x.kind for x in findings])
+                self.assertIn("人称", [x.kind for x in findings])
+
+    def test_person_style_argument_overrides_project_config(self):
+        note = self.write_note("你可以保存文件。\n")
+        findings = check_file(note, {"person_style": "neutral"}, None, self.rules,
+                              person_style="instructional")
+        self.assertNotIn("人称", [x.kind for x in findings])
+
+    def test_bad_allow_regex_preserves_other_valid_and_default_exemptions(self):
+        note = self.write_note("INSERT INTO t VALUES ('你');\n引用原文：你\n正文：你\n")
+        findings = check_file(note, {"allow_line_patterns": ["^引用原文：", "["]}, None, self.rules)
+        self.assertEqual([x.line for x in findings if x.kind == "人称"], [3])
+        self.assertTrue(any(x.kind == "配置" and x.level == "WARN" for x in findings))
+
+    def test_multiple_backtick_inline_code_is_not_scanned_as_prose(self):
+        note = self.write_note('使用 ``print("你"); value = `x` `` 中的表达式。\n')
+        findings = check_file(note, {}, None, self.rules)
+        self.assertNotIn("人称", [x.kind for x in findings])
+
+    def test_unclosed_inline_code_does_not_hide_prose(self):
+        note = self.write_note("未闭合的 `代码后面仍然有你。\n")
+        findings = check_file(note, {}, None, self.rules)
+        self.assertIn("人称", [x.kind for x in findings])
+
+    def test_utf8_bom_does_not_break_heading_sequence_detection(self):
+        note = self.write_note("\ufeff## 1. 开始\n## 2. 继续\n")
+        findings = check_file(note, {}, None, self.rules)
+        self.assertNotIn("编号", [x.kind for x in findings])
+
+    def test_two_spaces_for_markdown_line_break_are_preserved(self):
+        note = self.write_note("合法换行。  \n多余空白。 \n")
+        findings = check_file(note, {}, None, self.rules)
+        self.assertEqual([x.line for x in findings if x.kind == "行尾空白"], [2])
+
+    def test_zero_based_heading_number_is_explicitly_supported(self):
+        note = self.write_note("## 0. 前置说明\n## 1. 操作\n")
+        findings = check_file(note, {"first_heading_number": 0}, None, self.rules)
+        self.assertFalse(any(x.kind in {"编号", "配置"} for x in findings))
+
+    def test_timeline_term_requires_context_instead_of_being_an_error(self):
+        note = self.write_note("根据事件时间绘制时间轴。\n")
+        findings = check_file(note, {}, None, self.rules)
+        self.assertFalse(any(x.level == "ERROR" for x in findings))
+        self.assertIn("语境用语", [x.kind for x in findings])
+
+
+    def test_cli_person_style_overrides_discovered_config(self):
+        note = self.write_note("你可以保存文件。\n")
+        (self.root / ".formal-docs.json").write_text(
+            json.dumps({"person_style": "neutral"}), encoding="utf-8",
+        )
+        command = [sys.executable, str(SKILL_ROOT / "scripts/check_notes.py"), str(note)]
+        default = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=10)
+        override = subprocess.run(command + ["--person-style", "instructional"],
+                                  capture_output=True, text=True, encoding="utf-8", timeout=10)
+        self.assertEqual(default.returncode, 0)
+        self.assertEqual(override.returncode, 0)
+        self.assertIn("[人称]", default.stdout)
+        self.assertNotIn("[人称]", override.stdout)
 
 
 if __name__ == "__main__":

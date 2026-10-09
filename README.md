@@ -76,11 +76,14 @@ python scripts/check_notes.py docs/note.md --config .formal-docs.json
 {
   "banned": ["仅内部使用的模块名", "对照版"],
   "allow_line_patterns": ["INSERT INTO", "VALUES \\("],
+  "person_style": "neutral",
   "space_check": false,
   "numbered_headings": "auto",
   "first_heading_number": 1
 }
 ```
+
+人称策略可用 `--person-style neutral|instructional|preserve` 覆盖项目配置；默认保持中性文风，操作教程可允许第二人称。详细配置见 `references/banned-phrases.md`。结构按受众和项目约定选择，不强制套固定骨架。
 
 ## 测试
 
