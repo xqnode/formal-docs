@@ -56,6 +56,13 @@ class CheckNotesTests(unittest.TestCase):
         levels = [item.level for item in findings if item.kind == "语境用语"]
         self.assertEqual(levels, ["WARN", "WARN"])
 
+    def test_lesson_sequencing_terms_are_warnings(self):
+        note = self.write_note("## 1. 标题\n先讲第一个道理：只读是刻意的。\n")
+        findings = check_file(note, {}, None, self.rules)
+        hits = [item for item in findings if item.kind == "语境用语"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].level, "WARN")
+
     def test_plain_fence_is_treated_as_code_not_prose(self):
         note = self.write_note("## 1. 标题\n```plain\nDATABASE_URL=你的密码\n```\n")
         findings = check_file(note, {}, None, self.rules)
