@@ -109,3 +109,81 @@
 > ```
 
 改动点：魔法数字注明取值原因；新语法在行旁写清与已知写法的区别，不只写在代码后的说明里。
+
+## 11. 增量块缺导入 → 指出复用来源或补全导入
+
+**Before**
+> 在文件顶部新增导入：
+> ```python
+> from app.services.semantic_service import search_records
+> ```
+> （正文另处又写“`embed_texts` 已由上一节导入”，实际上一节导入的是模块。）
+
+**After**
+> 在 `chat_service.py` 导入区域追加：
+> ```python
+> from app.services.semantic_service import TOP_K, search_records
+> ```
+> 调用向量函数沿用上一节的模块写法 `embedding_service.embed_texts(...)`，不再单独导入函数名。
+
+改动点：教学文档的代码块是分块给出的，读者会按块拼装。凡在代码里用到的名字，要么在本块给出导入，要么明确写出“沿用第 X 节的哪个名字”，不能让读者去猜；审稿时按“拼装成完整文件能否运行”验证，而非逐块语法检查。
+
+## 12. 宣称与代码不一致 → 对齐字段与分支
+
+**Before**
+> 本节保留事件协议，不新增事件与字段。
+> ```python
+> yield _sse("done", {"result": result_payload})
+> ```
+
+**After**
+> 事件仍是原来的四种，`done` 在空对象基础上增加 `result` 字段（加字段扩展，前端解析不受影响）。
+> ```python
+> yield _sse("done", {"result": result_payload})
+> ```
+
+改动点：正文的“协议不变”“不新增字段”这类概括要和代码逐条对齐；确实新增了字段就写清是加字段扩展，并说明前端为何不受影响。同一篇里既写“不新增”又新增，会让读者对协议失去判断依据。
+
+## 13. 断言依赖不可控字段 → 改断言对象并写清实现差异
+
+**Before**
+> ```python
+> items = sorted(response.data, key=lambda item: item.index)
+> if [item.index for item in items] != list(range(len(texts))):
+>     raise ValueError("向量服务返回的数量或位置不正确")
+> ```
+
+**After**
+> ```python
+> # 服务按输入顺序返回，data 的第 i 项对应 texts 的第 i 段。
+> # 位置字段 index 在当前服务商下恒为 0，不能作为顺序依据。
+> if len(response.data) != len(texts):
+>     raise ValueError("向量服务返回的条数与输入不一致")
+> ```
+
+改动点：位置字段来自服务商实现，兼容接口未按官方规范返回时断言必然失败。把校验放到可控的量上（条数），顺序改为依赖服务承诺并在注释与排错部分写明；外部服务字段的行为要以实测为准。
+
+## 14. 统一失败提示 → 分级提示并留日志
+
+**Before**
+> ```python
+>     except Exception:
+>         import logging
+>         logging.exception("语义检索失败")
+>         yield _sse("error", {"message": "语义检索失败，请检查后端日志和索引配置"})
+>         return
+> ```
+
+**After**
+> ```python
+>     except ValueError as exc:
+>         # 输入或索引校验失败：信息已面向用户，直接展示。
+>         yield _sse("error", {"message": str(exc)})
+>         return
+>     except Exception:
+>         logger.exception("语义检索失败")  # 终端记录堆栈，页面不显示细节。
+>         yield _sse("error", {"message": "语义检索失败，请检查后端日志和索引配置"})
+>         return
+> ```
+
+改动点：用户把“语义检索：”留空，得到的却是“检查后端日志和索引配置”，排查方向完全错；同时没有任何日志能事后定位。可预期的输入错误单独捕获并回显原文，其余异常才回落统一提示，并保留异常类型与关键语句的记录。
