@@ -26,10 +26,10 @@ class CheckNotesTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def test_scans_text_fences_but_skips_code_fences(self):
+    def test_scans_markdown_fences_but_skips_code_fences(self):
         note = self.write_note(
             "## 1. 标题\n"
-            "```text\n讲解点：你可以运行这个例子。\n```\n"
+            "```markdown\n讲解点：你可以运行这个例子。\n```\n"
             "```python\n# 讲解点：你\n```\n"
         )
         findings = check_file(note, {}, None, self.rules)
@@ -197,6 +197,86 @@ class CheckNotesTests(unittest.TestCase):
         self.assertEqual(override.returncode, 0)
         self.assertIn("[人称]", default.stdout)
         self.assertNotIn("[人称]", override.stdout)
+
+
+
+    def test_h1_forms_are_errors_with_source_lines(self):
+        for text, line in [("# 标题\n", 1), ("  # 标题\n", 1), ("#\n", 1),
+                           ("<H1 class='title'>标题</H1>\n", 1),
+                           ("标题\n====\n", 2), ("> # 引用标题\n", 1),
+                           ("<h1\nclass='title'>标题</h1>\n", 1)]:
+            with self.subTest(text=text):
+                hits = [f for f in check_file(self.write_note(text), {}, None, self.rules) if f.kind == "H1"]
+                self.assertTrue(hits)
+                self.assertEqual(hits[0].level, "ERROR")
+                self.assertEqual(hits[0].line, line)
+
+    def test_heading_examples_and_comments_do_not_trigger_h1(self):
+        text = ("```markdown\n# 示例\n<h1>示例</h1>\n标题\n====\n```\n"
+                "~~~text\n# 原始输出\n~~~\n"
+                "使用 `<h1>` 和 `# 标题` 描述语法。\n"
+                "<!--\n<h1>注释</h1>\n-->\n"
+                "    # 缩进代码\n## 正常标题\n#没有空格\n")
+        self.assertFalse(any(f.kind == "H1" for f in check_file(self.write_note(text), {}, None, self.rules)))
+
+    def test_setext_does_not_bridge_fences_or_blank_lines(self):
+        for text in ["正文\n\n====\n", "正文\n```text\n输出\n```\n====\n", "## 标题\n====\n"]:
+            with self.subTest(text=text):
+                self.assertFalse(any(f.kind == "H1" for f in check_file(self.write_note(text), {}, None, self.rules)))
+
+    def test_raw_output_is_preserved_without_prose_findings(self):
+        for language in ["text", "txt", "output", "plain", "prompt"]:
+            with self.subTest(language=language):
+                note = self.write_note(f"```{language}\n我的商品\n其实\n讲解点\n<h1>日志</h1>\n```\n")
+                self.assertEqual(check_file(note, {}, None, self.rules), [])
+        unclosed = self.write_note("```text\n我的输出\n")
+        self.assertTrue(any(f.kind == "围栏" and f.level == "ERROR" for f in check_file(unclosed, {}, None, self.rules)))
+
+    def test_review_hints_are_opt_in_and_non_authoritative(self):
+        text = ("## 操作\n```bash\nGET catalog:known\n```\n"
+                "[命令说明](https://example.com/docs)\n"
+                "## 排错\n检查 `GET`、`catalog:known` 和 `catalog:new`。\n"
+                "`WRONGTYPE` 是本段新介绍的错误示例。\n"
+                "第一篇的 `catalog:previous`。\n")
+        note = self.write_note(text)
+        self.assertFalse(any(f.kind in {"排错引用", "外链标注"} for f in check_file(note, {}, None, self.rules)))
+        findings = check_file(note, {"check_link_labels": True, "check_troubleshooting_identifiers": True}, None, self.rules)
+        review = [f for f in findings if f.kind in {"排错引用", "外链标注"}]
+        self.assertEqual(len(review), 3)
+        self.assertTrue(all(f.level == "INFO" for f in review))
+        self.assertFalse(any('catalog:known' in f.detail or 'catalog:previous' in f.detail for f in review))
+
+    def test_external_link_hint_skips_code_and_labelled_sources(self):
+        note = self.write_note("[官方说明（英文）](https://example.com/docs)\n```text\n[原始输出](https://example.com/)\n```\n")
+        self.assertFalse(any(f.kind == "外链标注" for f in check_file(note, {"check_link_labels": True}, None, self.rules)))
+
+    def test_cli_returns_nonzero_for_h1(self):
+        note = self.write_note("# 标题\n")
+        result = subprocess.run([sys.executable, str(SKILL_ROOT / "scripts/check_notes.py"), str(note)], capture_output=True, text=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("[H1]", result.stdout)
+
+
+
+    def test_h1_inside_list_containers_is_detected(self):
+        for text in ["- # 步骤\n", "1. # 步骤\n", "- 条目\n  # 步骤\n", "- 条目\n  - 子条目\n    # 步骤\n", "- 标题\n  ====\n"]:
+            with self.subTest(text=text):
+                self.assertTrue(any(f.kind == "H1" for f in check_file(self.write_note(text), {}, None, self.rules)))
+
+    def test_indented_list_code_and_root_underline_are_not_h1(self):
+        for text in ["- 条目\n\n      # 缩进代码\n", "-     # 缩进代码\n", "- 条目\n====\n", "> 引用\n====\n"]:
+            with self.subTest(text=text):
+                self.assertFalse(any(f.kind == "H1" for f in check_file(self.write_note(text), {}, None, self.rules)))
+
+
+
+    def test_quoted_fenced_examples_do_not_trigger_h1(self):
+        text = "> ```html\n> <h1>示例</h1>\n> ```\n> ```text\n> 我的商品\n> 其实\n> ```\n"
+        self.assertEqual(check_file(self.write_note(text), {}, None, self.rules), [])
+
+    def test_list_state_does_not_leak_into_a_new_quote_container(self):
+        note = self.write_note("- 条目\n>     # 引用中的缩进代码\n")
+        self.assertFalse(any(f.kind == "H1" for f in check_file(note, {}, None, self.rules)))
 
 
 if __name__ == "__main__":

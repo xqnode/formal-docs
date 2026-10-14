@@ -63,10 +63,7 @@
   ],
   "pronoun_pattern": "[你我您]",
   "prose_fence_languages": [
-    "text",
-    "txt",
     "markdown",
-    "md",
-    "prompt"
+    "md"
   ]
 }

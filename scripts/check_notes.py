@@ -8,7 +8,7 @@
     python check_notes.py doc.md --no-space     # 强制关闭配置中的空格检查
 
 按 ERROR / WARN / INFO 分级输出并带行号；存在 ERROR 时退出码为 1。
-只做机械可查项；文字围栏会扫描、代码围栏会跳过。语气、密钥、路径/链接有效性与内容自足性仍需人工判断。
+只做机械可查项；markdown/md 围栏扫描文风，原始输出和代码围栏跳过文风。语气、密钥、路径/链接有效性与内容自足性仍需人工判断。
 """
 
 from __future__ import annotations
@@ -64,12 +64,19 @@ def strip_inline(line: str) -> str:
     return INLINE_CODE.sub("``", line)
 
 
+def fence_source(line):
+    """Remove blockquote containers only for fence recognition."""
+    while re.match(r"^ {0,3}>[ \t]?", line):
+        line = re.sub(r"^ {0,3}>[ \t]?", "", line, count=1)
+    return line
+
+
 def first_h2_heading(lines: list[str]):
     """Return the first level-2 heading outside fenced blocks, if any."""
     fence_char = ""
     fence_length = 0
     for line in lines:
-        match = FENCE.match(line)
+        match = FENCE.match(fence_source(line))
         if match:
             marker, rest = match.groups()
             if not fence_char:
@@ -85,6 +92,127 @@ def first_h2_heading(lines: list[str]):
     return None
 
 
+
+def outside_fences(lines):
+    """Yield source lines outside fenced blocks, retaining source line numbers."""
+    marker_char, marker_length = "", 0
+    for number, line in enumerate(lines, 1):
+        match = FENCE.match(fence_source(line))
+        if match:
+            marker, rest = match.groups()
+            if not marker_char:
+                marker_char, marker_length = marker[0], len(marker)
+            elif marker[0] == marker_char and len(marker) >= marker_length and not rest.strip():
+                marker_char, marker_length = "", 0
+            continue
+        if not marker_char:
+            yield number, line
+
+
+def check_h1(lines):
+    """Detect rendered H1 forms; leave fenced/inline examples and comments intact."""
+    findings, previous, previous_number, in_comment = [], "", 0, False
+    list_indent, previous_context = None, None
+    for number, raw_line in outside_fences(lines):
+        line = strip_inline(raw_line)
+        # Ignore HTML comments, including comments continued from previous lines.
+        clean = ""
+        while line:
+            if in_comment:
+                end = line.find("-->")
+                if end < 0:
+                    line = ""
+                else:
+                    in_comment, line = False, line[end + 3:]
+            else:
+                start = line.find("<!--")
+                if start < 0:
+                    clean += line
+                    line = ""
+                else:
+                    clean += line[:start]
+                    line, in_comment = line[start + 4:], True
+        # Blockquote/list containers may contain actual rendered headings.
+        quote_depth = 0
+        while re.match(r"^ {0,3}>[ \t]?", clean):
+            clean = re.sub(r"^ {0,3}>[ \t]?", "", clean, count=1)
+            quote_depth += 1
+        if previous_context is not None and quote_depth != previous_context[0]:
+            list_indent = None
+        indent = len(clean) - len(clean.lstrip(" "))
+        offset = 0
+        if list_indent is not None:
+            if clean.strip() and indent < list_indent:
+                list_indent = None
+            elif indent >= list_indent:
+                offset, clean = list_indent, clean[list_indent:]
+        item = re.match(r"^ {0,3}(?:[-+*]|\d+[.)])[ \t]{1,4}(?=\S)", clean)
+        if item:
+            offset += item.end()
+            list_indent, clean = offset, clean[item.end():]
+        context = (quote_depth, list_indent)
+        if clean.startswith(("    ", "\t")):
+            previous, previous_number = "", number
+            continue
+        atx = re.match(r"^ {0,3}#(?:[ \t]+|$)", clean)
+        html = re.search(r"<h1(?:\s|>|$)", clean, re.IGNORECASE)
+        setext = (re.fullmatch(r" {0,3}=+[ \t]*", clean) and
+                  previous_number == number - 1 and previous_context == context and previous.strip() and
+                  not re.match(r"^ {0,3}(?:#{1,6}(?:\s|$)|[-+*]\s|\d+[.)]\s)", previous))
+        if atx or html or setext:
+            findings.append(Finding("ERROR", number, "H1", "正文禁止一级标题；改用 H2/H3，原始代码示例放入围栏"))
+        previous, previous_number, previous_context = clean, number, context
+    return findings
+
+
+def review_hints(lines, cfg):
+    """Optional, non-authoritative reminders for links and troubleshooting references."""
+    findings, trouble_level, ordinary, candidates = [], None, [], []
+    in_fence, marker_length = "", 0
+    for number, line in enumerate(lines, 1):
+        match = FENCE.match(fence_source(line))
+        if match:
+            marker, rest = match.groups()
+            if not in_fence:
+                in_fence, marker_length = marker[0], len(marker)
+            elif marker[0] == in_fence and len(marker) >= marker_length and not rest.strip():
+                in_fence = ""
+            continue
+        if in_fence:
+            if trouble_level is None:
+                ordinary.append(line)
+            continue
+        heading = re.match(r"^ {0,3}(#{2,6})\s+(.+)", line)
+        if heading:
+            level, title = len(heading.group(1)), heading.group(2)
+            if trouble_level is not None and level <= trouble_level:
+                trouble_level = None
+            if re.search(r"排错|错误|出错|故障|排查", title):
+                trouble_level = level
+        if cfg.get("check_link_labels") and not line.startswith(("    ", "\t")):
+            prose = strip_inline(line)
+            for link in re.finditer(r"(?<!!)\[([^]\n]+)\]\((https?://[^)\s]+)\)", prose):
+                label = link.group(1)
+                if not re.search(r"官方|英文|中文|English", label, re.I):
+                    findings.append(Finding("INFO", number, "外链标注", f"“{label}”：人工确认页面语言和来源，必要时补充标注；不据域名自动判定"))
+        if trouble_level is None:
+            ordinary.append(line)
+        elif cfg.get("check_troubleshooting_identifiers"):
+            # Explicit prior-chapter references may be legitimate; reviewers verify the target.
+            if re.search(r"第\s*[0-9一二三四五六七八九十]+\s*[篇章节]|前[一两二]篇|上一篇|上一节|参考答案|练习", line):
+                continue
+            for match in INLINE_CODE.finditer(line):
+                identifier = match.group(2)
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_./:\\=-]{0,119}", identifier):
+                    candidates.append((number, identifier))
+    context, seen = "\n".join(ordinary), set()
+    for number, identifier in candidates:
+        if identifier not in context and identifier not in seen:
+            seen.add(identifier)
+            findings.append(Finding("INFO", number, "排错引用", f"`{identifier}` 仅在排错区域出现：核对前篇引用或完整的新失败示例；不自动判错"))
+    return findings
+
+
 def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = None,
                *, person_style: str | None = None) -> list[Finding]:
     raw = path.read_bytes()
@@ -92,6 +220,12 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
     lines = text.splitlines()
     findings: list[Finding] = []
     rules = rules or load_rules()
+    findings.extend(check_h1(lines))
+    for option in ("check_link_labels", "check_troubleshooting_identifiers"):
+        if option in cfg and not isinstance(cfg[option], bool):
+            findings.append(Finding("WARN", 0, "配置", f"{option} 必须是布尔值；该提示已忽略"))
+    hints_cfg = {key: value for key, value in cfg.items() if key not in {"check_link_labels", "check_troubleshooting_identifiers"} or isinstance(value, bool)}
+    findings.extend(review_hints(lines, hints_cfg))
 
     if "\ufffd" in text:
         n = text.count("\ufffd")
@@ -219,7 +353,7 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
                 findings.append(Finding("INFO", line_no, "空格", "中英文/数字间可能缺少空格"))
 
     for i, line in enumerate(lines, start=1):
-        fence_match = FENCE.match(line)
+        fence_match = FENCE.match(fence_source(line))
         if fence_match:
             marker, rest = fence_match.groups()
             if not fence_char:
@@ -256,7 +390,7 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
         if numbering:
             clean = HTML_TAG.sub("", line)
             if clean.startswith("## ") and not clean.startswith("### ") and not HEADING_2.match(clean):
-                findings.append(Finding("WARN", i, "编号", "本篇使用编号标题，但该一级标题没有编号"))
+                findings.append(Finding("WARN", i, "编号", "本篇使用编号标题，但该 H2 标题没有编号"))
             hm = HEADING_2.match(clean)
             if hm:
                 num = int(hm.group(1))
