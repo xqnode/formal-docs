@@ -25,7 +25,8 @@ RULES_PATH = Path(__file__).resolve().parents[1] / "references" / "default-rules
 DEFAULT_ALLOW = [r"INSERT\s+INTO", r"VALUES\s*\("]
 INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 HTML_TAG = re.compile(r"<[^>]+>")
-FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+THEMATIC_BREAK = re.compile(r"^ {0,3}(?:(?:\* *){3,}|(?:- *){3,}|(?:_ *){3,})[ \t]*$")
 HEADING_2 = re.compile(r"^##\s+(\d+)\.\s")
 HEADING_3 = re.compile(r"^###\s+(\d+)\.(\d+)\s")
 
@@ -45,6 +46,7 @@ def load_config(path_arg, doc_path: Path) -> dict:
         if not candidates[0].is_file():
             raise FileNotFoundError(f"显式指定的配置文件不存在：{candidates[0]}")
     else:
+        doc_path = doc_path.resolve()
         candidates = [parent / ".formal-docs.json" for parent in [doc_path.parent, *doc_path.parent.parents]]
 
     for config_path in candidates:
@@ -64,27 +66,95 @@ def strip_inline(line: str) -> str:
     return INLINE_CODE.sub("``", line)
 
 
-def fence_source(line):
-    """Remove blockquote containers only for fence recognition."""
-    while re.match(r"^ {0,3}>[ \t]?", line):
-        line = re.sub(r"^ {0,3}>[ \t]?", "", line, count=1)
-    return line
+def markdown_lines(lines, *, normalized=False):
+    """Share fence state across checks, retaining the quote/list containers that opened it."""
+    containers = []
+    marker_char, marker_length, opening_line = "", 0, 0
+    in_paragraph = False
+    in_comment_block = False
+    for number, raw in enumerate(lines, 1):
+        line = raw.expandtabs(4)
+        matched = []
+        for container in containers:
+            kind, width, _ = container
+            if kind == "quote":
+                prefix = re.match(r"^ {0,3}> ?", line)
+                if not prefix:
+                    break
+                line = line[prefix.end():]
+            elif not line.strip():
+                line = ""
+            elif line.startswith(" " * width):
+                line = line[width:]
+            else:
+                break
+            matched.append(container)
+        if len(matched) != len(containers):
+            # A fenced block cannot continue outside its original container.
+            marker_char, marker_length = "", 0
+            in_paragraph = False
+            in_comment_block = False
+        containers = matched
+
+        if not marker_char and not in_comment_block:
+            while True:
+                if THEMATIC_BREAK.fullmatch(line):
+                    break
+                quote = re.match(r"^ {0,3}> ?", line)
+                item = re.match(
+                    r"^( {0,3})([-+*]|\d{1,9}[.)])(?:( {1,4})(?=\S)| *$)", line
+                )
+                if quote:
+                    in_paragraph = False
+                    containers.append(("quote", 0, number))
+                    line = line[quote.end():]
+                elif item:
+                    in_paragraph = False
+                    width = item.end() if item[3] else len(item[1]) + len(item[2]) + 1
+                    containers.append(("list", width, number))
+                    line = line[item.end():]
+                else:
+                    break
+
+        if not marker_char and (in_comment_block or re.match(r"^ {0,3}<!--", line)):
+            # HTML comment blocks own their complete lines; their fence-like text is literal.
+            comment_start = 0 if in_comment_block else line.index("<!--") + 4
+            in_comment_block = "-->" not in line[comment_start:]
+            in_paragraph = False
+            yield number, raw, "comment", ""
+            continue
+
+        match = FENCE.match(line)
+        if marker_char:
+            if match and match[1][0] == marker_char and len(match[1]) >= marker_length and not match[2].strip():
+                marker_char, marker_length = "", 0
+                in_paragraph = False
+                yield number, raw, "close", ""
+            else:
+                yield number, raw, "body", ""
+        elif match and not (match[1][0] == "`" and "`" in match[2]):
+            in_paragraph = False
+            marker_char, marker_length, opening_line = match[1][0], len(match[1]), number
+            info = match[2].strip().split(maxsplit=1)[0].lower() if match[2].strip() else ""
+            yield number, raw, "open", info
+        else:
+            indented_code = line.startswith("    ") and not in_paragraph
+            yield number, line if normalized else raw, "code" if indented_code else "text", tuple(containers)
+            block_end = (re.match(r"^ {0,3}#{1,6}(?:\s|$)", line) or
+                         re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line) or
+                         THEMATIC_BREAK.fullmatch(line))
+            if not line.strip() or indented_code or block_end:
+                in_paragraph = False
+            else:
+                in_paragraph = True
+    if marker_char:
+        yield opening_line, "", "unclosed", ""
 
 
 def first_h2_heading(lines: list[str]):
     """Return the first level-2 heading outside fenced blocks, if any."""
-    fence_char = ""
-    fence_length = 0
-    for line in lines:
-        match = FENCE.match(fence_source(line))
-        if match:
-            marker, rest = match.groups()
-            if not fence_char:
-                fence_char, fence_length = marker[0], len(marker)
-            elif marker[0] == fence_char and len(marker) >= fence_length and not rest.strip():
-                fence_char, fence_length = "", 0
-            continue
-        if fence_char:
+    for _, line, kind, _ in markdown_lines(lines):
+        if kind != "text":
             continue
         clean = HTML_TAG.sub("", line)
         if clean.startswith("## ") and not clean.startswith("### "):
@@ -93,27 +163,16 @@ def first_h2_heading(lines: list[str]):
 
 
 
-def outside_fences(lines):
-    """Yield source lines outside fenced blocks, retaining source line numbers."""
-    marker_char, marker_length = "", 0
-    for number, line in enumerate(lines, 1):
-        match = FENCE.match(fence_source(line))
-        if match:
-            marker, rest = match.groups()
-            if not marker_char:
-                marker_char, marker_length = marker[0], len(marker)
-            elif marker[0] == marker_char and len(marker) >= marker_length and not rest.strip():
-                marker_char, marker_length = "", 0
-            continue
-        if not marker_char:
-            yield number, line
-
-
 def check_h1(lines):
     """Detect rendered H1 forms; leave fenced/inline examples and comments intact."""
     findings, previous, previous_number, in_comment = [], "", 0, False
-    list_indent, previous_context = None, None
-    for number, raw_line in outside_fences(lines):
+    previous_context = None
+    for number, raw_line, kind, context in markdown_lines(lines, normalized=True):
+        if kind != "text":
+            if kind == "comment":
+                # Block comments are already consumed by the scanner, including their terminator.
+                in_comment = False
+            continue
         line = strip_inline(raw_line)
         # Ignore HTML comments, including comments continued from previous lines.
         clean = ""
@@ -132,25 +191,7 @@ def check_h1(lines):
                 else:
                     clean += line[:start]
                     line, in_comment = line[start + 4:], True
-        # Blockquote/list containers may contain actual rendered headings.
-        quote_depth = 0
-        while re.match(r"^ {0,3}>[ \t]?", clean):
-            clean = re.sub(r"^ {0,3}>[ \t]?", "", clean, count=1)
-            quote_depth += 1
-        if previous_context is not None and quote_depth != previous_context[0]:
-            list_indent = None
-        indent = len(clean) - len(clean.lstrip(" "))
-        offset = 0
-        if list_indent is not None:
-            if clean.strip() and indent < list_indent:
-                list_indent = None
-            elif indent >= list_indent:
-                offset, clean = list_indent, clean[list_indent:]
-        item = re.match(r"^ {0,3}(?:[-+*]|\d+[.)])[ \t]{1,4}(?=\S)", clean)
-        if item:
-            offset += item.end()
-            list_indent, clean = offset, clean[item.end():]
-        context = (quote_depth, list_indent)
+        # Container prefixes were removed by the shared Markdown scanner.
         if clean.startswith(("    ", "\t")):
             previous, previous_number = "", number
             continue
@@ -168,18 +209,9 @@ def check_h1(lines):
 def review_hints(lines, cfg):
     """Optional, non-authoritative reminders for links and troubleshooting references."""
     findings, trouble_level, ordinary, candidates = [], None, [], []
-    in_fence, marker_length = "", 0
-    for number, line in enumerate(lines, 1):
-        match = FENCE.match(fence_source(line))
-        if match:
-            marker, rest = match.groups()
-            if not in_fence:
-                in_fence, marker_length = marker[0], len(marker)
-            elif marker[0] == in_fence and len(marker) >= marker_length and not rest.strip():
-                in_fence = ""
-            continue
-        if in_fence:
-            if trouble_level is None:
+    for number, line, kind, _ in markdown_lines(lines):
+        if kind != "text":
+            if kind in {"body", "code"} and trouble_level is None:
                 ordinary.append(line)
             continue
         heading = re.match(r"^ {0,3}(#{2,6})\s+(.+)", line)
@@ -301,9 +333,6 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
     heading_main = expected_first - 1
     heading_sub = 0
 
-    fence_char = ""
-    fence_length = 0
-    fence_open_line = 0
     scan_text_fence = False
     prose_languages = {lang.lower() for lang in rules.get("prose_fence_languages", [])}
     blank_run = 0
@@ -352,26 +381,23 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
             if re.search(r"[\u4e00-\u9fff][A-Za-z0-9]|[A-Za-z0-9][\u4e00-\u9fff]", prose):
                 findings.append(Finding("INFO", line_no, "空格", "中英文/数字间可能缺少空格"))
 
-    for i, line in enumerate(lines, start=1):
-        fence_match = FENCE.match(fence_source(line))
-        if fence_match:
-            marker, rest = fence_match.groups()
-            if not fence_char:
-                fence_char, fence_length, fence_open_line = marker[0], len(marker), i
-                info = rest.strip().split(maxsplit=1)[0].lower() if rest.strip() else ""
-                scan_text_fence = info in prose_languages
-                if not info:
-                    findings.append(Finding("INFO", i, "代码围栏", "未标注语言；代码片段可补充语言，纯文本示意可标注 text"))
-            elif marker[0] == fence_char and len(marker) >= fence_length and not rest.strip():
-                fence_char, fence_length, scan_text_fence = "", 0, False
-                blank_run = 0
-            elif scan_text_fence:
-                scan_prose(line, i, in_text_fence=True)
+    for i, line, kind, info in markdown_lines(lines):
+        if kind == "unclosed":
+            findings.append(Finding("ERROR", i, "围栏", "代码围栏未闭合"))
             continue
-
-        if fence_char:
+        if kind == "open":
+            scan_text_fence = info in prose_languages
+            if not info:
+                findings.append(Finding("INFO", i, "代码围栏", "未标注语言；代码片段可补充语言，纯文本示意可标注 text"))
+            continue
+        if kind == "close":
+            scan_text_fence, blank_run = False, 0
+            continue
+        if kind == "body":
             if scan_text_fence and line.strip():
                 scan_prose(line, i, in_text_fence=True)
+            continue
+        if kind in {"code", "comment"}:
             continue
 
         if not line.strip():
@@ -403,9 +429,6 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
                 if sub != heading_sub + 1 or parent != heading_main:
                     findings.append(Finding("WARN", i, "编号", f"子标题 {parent}.{sub} 与前序不一致"))
                 heading_sub = sub
-
-    if fence_char:
-        findings.append(Finding("ERROR", fence_open_line, "围栏", "代码围栏未闭合"))
 
     used_quote_styles = [(name, locations[0]) for name, locations in quote_styles.items() if locations]
     if len(used_quote_styles) > 1:
