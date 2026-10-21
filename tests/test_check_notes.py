@@ -126,6 +126,13 @@ class CheckNotesTests(unittest.TestCase):
         findings = check_file(note, {"person_style": "instructional"}, None, self.rules)
         self.assertEqual([x.line for x in findings if x.kind == "人称"], [3])
 
+    def test_instructional_we_is_not_spoken_or_person_warning(self):
+        note = self.write_note("从这一篇开始，我们来学习 MySQL。\n我来演示。\n讲解点：操作步骤。\n")
+        findings = check_file(note, {"person_style": "instructional"}, None, self.rules)
+        self.assertFalse(any(x.line == 1 and x.kind in {"人称", "口播腔"} for x in findings))
+        self.assertTrue(any(x.line == 2 and x.kind == "人称" for x in findings))
+        self.assertTrue(any(x.line == 3 and x.level == "ERROR" for x in findings))
+
     def test_preserve_style_does_not_disable_internal_term_checks(self):
         note = self.write_note("你和我保留原称呼。\n讲解点：复现步骤。\n")
         findings = check_file(note, {"person_style": "preserve"}, None, self.rules)

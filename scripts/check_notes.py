@@ -272,7 +272,7 @@ def check_file(path: Path, cfg: dict, space: bool | None, rules: dict | None = N
         filler_rules = [re.compile(re.escape(word)) for word in rules["filler_info"]]
         pronoun_pattern = rules.get("pronoun_pattern", "[你我您]")
         if selected_person_style == "instructional":
-            pronoun_pattern = "我"
+            pronoun_pattern = r"我(?!们)"
         elif selected_person_style == "preserve":
             pronoun_pattern = r"(?!)"
         pronoun_re = re.compile(pronoun_pattern)
