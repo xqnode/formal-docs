@@ -29,7 +29,7 @@ metadata:
 | 实战教程的教学组织与操作自足性；明确要求的视频工作量 | [课程笔记约定](references/course-notes.md)，以学员独立完成任务为默认目标 |
 | Python 环境、依赖、API 模型与响应约定或增量代码 | [Python 教程](references/python-tutorials.md) |
 | Redis、SQL、shell 等命令示例 | [命令与输出验证](references/command-validation.md) |
-| 数据流、分支、状态或模块图解 | [图解辅助理解](references/diagrams.md)；主动评估图解价值，采用清晰配色 |
+| 调用顺序、数据流、分支、状态或模块图解 | [图解辅助理解](references/diagrams.md)；能减轻理解负担时主动配 SVG，不凑图 |
 | 文风审计、配置或替换示例 | [禁用词与配置](references/banned-phrases.md)、[正反例](references/examples.md) |
 
 教学交付是让学员通过文档理解实现思路，找到修改位置，完成操作并判断结果。代码按功能与实现顺序解释，不按手写、带读、复制划分教学内容，不以教师演示节奏或带敲时长决定篇幅；具体方式见结构参考。能按笔记完成任务不等于已经能够脱离引导独立设计和实现。
