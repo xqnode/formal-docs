@@ -27,7 +27,7 @@ metadata:
 | --- | --- |
 | 结构取舍、代码呈现或文字练习 | [结构与写作要点](references/structure-template.md)；先跑通最小任务，再逐步加入必要机制 |
 | 实战教程的教学组织与操作自足性；明确要求的视频工作量 | [课程笔记约定](references/course-notes.md)，以学员独立完成任务为默认目标 |
-| Python 环境、依赖、API 模型与响应约定或增量代码 | [Python 教程](references/python-tutorials.md) |
+| Python 环境、依赖、分层文件命名、logging 配置、API 模型与响应约定或增量代码 | [Python 教程](references/python-tutorials.md) |
 | Redis、SQL、shell 等命令示例 | [命令与输出验证](references/command-validation.md) |
 | 调用顺序、数据流、分支、状态或模块图解 | [图解辅助理解](references/diagrams.md)；能减轻理解负担时主动配 SVG，不凑图 |
 | 文风审计、配置或替换示例 | [禁用词与配置](references/banned-phrases.md)、[正反例](references/examples.md) |

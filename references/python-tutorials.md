@@ -1,11 +1,11 @@
 ## Python 教程的环境、依赖与 API 约定
 
-在 Python 教程涉及环境、依赖、API 模型命名、统一响应或增量代码时读取。示例版本不作为其他项目的固定要求。
+在 Python 教程涉及环境、依赖、分层文件命名、logging 配置、API 模型命名、统一响应或增量代码时读取。示例版本不作为其他项目的固定要求。
 
 ### 依赖安装
 
 - 编写 Python 教程的依赖安装步骤时，先交代项目根目录中的 `requirements.txt`，给出带明确版本号的完整内容，例如 `fastapi[standard]==0.124.4`。版本沿用项目约定或已核验的兼容版本，不把示例版本作为所有项目的固定要求，也不编造版本号。
-- 再给出在项目根目录执行的安装命令。Windows 虚拟环境统一使用 `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`；其他平台使用对应虚拟环境解释器调用 `-m pip`。不要把解释器路径和裸 `pip install` 拆成两条命令。
+- 再给出实际执行目录和虚拟环境激活命令，然后运行项目约定的安装命令。Windows PowerShell 示例：在虚拟环境所在目录执行 `.\.venv\Scripts\Activate.ps1`，确认当前终端已激活后执行 `pip install -r requirements.txt`。系列课程已有命令习惯时沿用；不以完整虚拟环境解释器路径代替激活步骤。
 - 后续增加依赖时，说明对已有 `requirements.txt` 的追加或修改，保留仍需要的依赖，再执行同一安装命令；依赖文件、目录结构与运行说明同步更新。只安装当前章节需要的包，区分固定直接依赖版本与完整锁定传递依赖，不宣称仅用直接依赖列表实现完全相同的环境。
 
 ### 命令简写与惯用写法
@@ -13,9 +13,40 @@
 - 编写和交付前主动审查示例代码的惯用写法：在语义等价且更易理解时，直接采用自然、简洁的表达，不等用户指出后再修改，也不为显得基础而保留冗余判断。必要时在首次出现处解释短路求值、真值判断等前置概念；不以缩短代码为目标引入难读的技巧。
 - 简化前核对参数类型和边界值。只需排除 None、空字符串的可选字符串可用真值判断；纯空白仍需单独处理。需要保留有效的 0、False 或区分空容器与 None 时，保留显式的 `is not None`，不机械替换。同步核对代码、注释和验收结果。
 
-- Python 教程每篇在首次运行脚本前，先说明在项目根目录激活虚拟环境一次。Windows PowerShell 使用 `.\.venv\Scripts\Activate.ps1`；当前终端已激活时跳过，新开终端后重新激活。后续正文、分步示例、练习和答案统一用 `py example.py`，其中 `example.py` 替换为实际脚本名，不固定为 `main.py`，不重复使用虚拟环境解释器的完整路径。
-- macOS / Linux 用 `source .venv/bin/activate` 激活，后续使用 `python example.py`。说明执行目录与激活前提，不把 VS Code 选择解释器等同于终端已激活；激活失败时可给完整解释器路径作为备用，不要求修改系统策略。框架命令同样放在已激活的终端中运行，例如 `uvicorn app.main:app --reload`。
-- 提供有助于当前知识点的代码技巧时，解释用途、与原写法的关系及必要限制，不用尚未讲解的复杂写法替代基础代码。依赖安装仍以 `requirements.txt` 和完整虚拟环境解释器命令为主线；有简写时保持依赖文件与安装目标一致。
+- Python 教程每篇在首次安装依赖或运行程序前，先说明在虚拟环境所在目录激活一次。Windows PowerShell 使用 `.\.venv\Scripts\Activate.ps1`；当前终端已激活时跳过，新开终端后重新激活。后续命令用激活后的 `pip`、`python` 或课程已约定的简写，不反复写完整解释器路径。脚本名使用实际文件名，不固定为 `main.py`。
+- macOS / Linux 在项目明确需要时用 `source .venv/bin/activate` 激活。说明执行目录与激活前提，不把 VS Code 选择解释器等同于终端已激活；激活失败时可给完整解释器路径作为备用，不要求修改系统策略。框架命令同样放在已激活的终端中运行，例如 `uvicorn app.main:app --reload`。
+- 提供有助于当前知识点的代码技巧时，解释用途、与原写法的关系及必要限制，不用尚未讲解的复杂写法替代基础代码。依赖安装仍以 `requirements.txt` 为主线；所用命令与激活的环境、依赖文件及安装目标保持一致。
+
+### 分层文件命名
+
+适用于已采用 API、Service、Models、Schemas 分层的 Python Web API 教程；不为套用命名约定额外引入分层。新设计默认统一采用下表，已有项目规范或用户明确约定优先。这是项目命名约定，不是 Python 或框架的强制标准。
+
+| 层 | 命名规则 | 示例 |
+| --- | --- | --- |
+| API | 资源名复数 | `api/products.py`、`api/categories.py` |
+| Service | 实体名单数加 `_service` | `services/product_service.py`、`services/category_service.py` |
+| Models | 实体名单数 | `models/product.py`、`models/category.py` |
+| Schemas | 实体名单数 | `schemas/product.py`、`schemas/category.py` |
+
+- 文件名统一使用小写与下划线；`services`、`models`、`schemas` 目录名使用复数。API 模块按资源集合命名，Service、Models、Schemas 模块按业务实体命名。资源 URL 默认用复数（如 `/products`），但 URL 的复数形式并不强制决定 Python 文件名。
+- 一个 schema 文件可容纳同一实体的新增、修改、响应等多个模型，类名仍按下节的 `XxxCreateRequest`、`XxxUpdateRequest`、`XxxResponse` 约定，不因文件名单数而拆成每个类一个文件。
+- 同一系列的目录树、正文路径、文件标题、导入语句和代码示例保持一致，不交替使用 `product.py` 与 `product_service.py` 表达同一个 Service 模块。更新本约定不自动重命名已交付项目；已授权迁移时同步相关引用。
+
+### 首次使用 logging
+
+- 教程首次引入 `logging` 时，在第一次日志调用前给出可运行的初始化配置，明确日志级别与输出格式，不能只给 `logger.error(...)` 或 `logging.exception(...)`。默认将配置放在应用入口 `main.py` 的初始化位置，在业务日志产生前执行；项目已有统一日志配置时沿用，并说明配置位置与生效方式，不重复配置。
+- 入门示例可采用以下配置，并解释 `INFO` 会输出 INFO 及以上级别，格式依次包含时间、级别、logger 名称与消息；级别和格式有项目约定时以项目为准。
+
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+```
+
+- 其他模块使用 `logger = logging.getLogger(__name__)` 获取 logger，复用入口配置，不在每个模块或请求中重复调用 `basicConfig()`。若运行环境已有 root handler，`basicConfig()` 默认可能不生效；核对启动方式和实际输出，沿用现有配置或在统一入口调整，不无条件使用 `force=True` 覆盖配置。
 
 ### API 请求模型与统一响应
 
