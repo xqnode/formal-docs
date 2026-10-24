@@ -30,6 +30,7 @@ formal-docs/
     diagrams.md                   # 图解细节
     example-validation.md         # 日常示例验证与交叉核对
     review-loop.md                # 复审：单独触发的多代理审改闭环
+    course-review-to-publish.md    # 课程复审到发布的可选参考，不自动执行
   scripts/
     check_notes.py                # 自检脚本
     extract_blocks.py             # 只读抽取命令与输出，不执行
@@ -62,6 +63,8 @@ formal-docs/
 默认流程是读取材料、写稿或修改、必要验证、机械检查与作者自检、交付。结构、运行操作、截图和示例验证按 `SKILL.md` 路由加载；新写完整文章与普通审稿均不自动派代理或进入复审。
 
 [复审](references/review-loop.md) 是单独触发的流程，只有明确要求“复审”、多代理审改闭环或本任务已有明确授权时才执行。其模型配置、核实修改、针对性复审和停止条件集中在该文件。可用“对这篇笔记执行复审闭环，允许修改文档”触发；若只要求复审报告，则只报告、不修改。
+
+[课程复审到发布参考](references/course-review-to-publish.md) 用于复审后建议临时验证、源码同步和发布的下一步，按需采用，不参与默认流程，也不扩展执行授权。
 
 ## 自检脚本
 

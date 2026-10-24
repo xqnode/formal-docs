@@ -28,6 +28,7 @@ metadata:
 | 系列实战笔记、操作自足性、运行排错、人工截图 | [课程笔记约定](references/course-notes.md)；只读相关小节 |
 | 示例运行、增量代码与前后文核对 | [示例验证](references/example-validation.md)；只查相关项目 |
 | 用户明确要求“复审”或多代理审改闭环 | [复审](references/review-loop.md)；独立触发，不参与默认写作流程 |
+| 课程复审后需要建议验证、源码同步或发布的下一步 | [课程复审到发布参考](references/course-review-to-publish.md)；按需采用，不强制执行或扩展授权 |
 | Python 环境、依赖、分层命名、logging、API 模型或增量代码 | [Python 教程](references/python-tutorials.md) |
 | Redis、SQL、shell 等命令与输出 | [命令验证](references/command-validation.md) |
 | 调用顺序、数据流、分支、状态或模块图解 | [图解规则](references/diagrams.md) |
